@@ -1,0 +1,23 @@
+name: Vote Hyleria
+on:
+  schedule:
+    - cron: "0 */4 * * *"
+  workflow_dispatch:
+concurrency:
+  group: vote
+  cancel-in-progress: true
+jobs:
+  vote:
+    runs-on: ubuntu-latest
+    timeout-minutes: 350
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install playwright && playwright install --with-deps chromium
+      - run: python vote_bot.py
+        env:
+          LOOP_MINUTES: "340"
+          CHECK_EVERY: "60"
+          SESSION_JSON: ${{ secrets.SESSION_JSON }}
