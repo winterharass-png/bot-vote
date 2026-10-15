@@ -1,11 +1,12 @@
 """
-Bot de vote Hyleria.fr/vote (version téléphone / GitHub Actions)
+Bot de vote Hyleria.fr/vote (version téléphone / GitHub Actions) - avec diagnostic
 """
 import json
 import os
 import re
 import time
 from datetime import datetime
+from urllib.parse import urlparse
 from playwright.sync_api import sync_playwright, TimeoutError as PWTimeout
 
 URL = "https://hyleria.fr/vote"
@@ -17,10 +18,29 @@ SESSION = "session.json"
 COUNTDOWN = re.compile(r"\d{2}:\d{2}:\d{2}")
 RETRY_APRES = 300  # secondes : pas de nouvel essai sur un bouton avant 5 min
 dernier_essai = {}
+diag_fait = False
 
 
 def log(msg):
     print(f"[{datetime.now():%d/%m %H:%M:%S}] {msg}", flush=True)
+
+
+def hote(url):
+    return urlparse(url).netloc or url
+
+
+def diag(page, quand):
+    """Indices pour savoir si la page nous voit connecté (sans rien divulguer)."""
+    try:
+        corps = page.inner_text("body")
+    except Exception:
+        corps = ""
+    log(
+        f"[diag {quand}] site={hote(page.url)} "
+        f"| pseudo_visible={PSEUDO.lower() in corps.lower()} "
+        f"| mot_connexion={bool(re.search(r'se connecter|connexion', corps, re.I))} "
+        f"| mot_deconnexion={bool(re.search(r'déconnexion|deconnexion|se déconnecter', corps, re.I))}"
+    )
 
 
 def charger_session():
@@ -51,6 +71,8 @@ def charger_session():
                 cookie["expires"] = c["expirationDate"]
             cookies.append(cookie)
         data = {"cookies": cookies, "origins": []}
+        log(f"Session chargée : {len(cookies)} cookies, domaines = "
+            f"{sorted({c['domain'] for c in cookies})}")
     return data
 
 
@@ -72,12 +94,18 @@ def cliquer(ctx, page, btn):
         with ctx.expect_page(timeout=4000) as nouvelle:
             btn.click()
         ext = nouvelle.value
+        try:
+            ext.wait_for_load_state("load", timeout=15000)
+        except PWTimeout:
+            pass
+        log(f"  onglet externe ouvert : {hote(ext.url)}")
         ext.wait_for_timeout(6000)
         ext.close()
         page.bring_to_front()
     except PWTimeout:
         # pas de nouvel onglet : le site s'ouvre dans le même onglet
         page.wait_for_timeout(6000)
+        log(f"  même onglet, site : {hote(page.url)}")
         if "hyleria.fr" not in page.url:
             page.go_back()
     page.wait_for_timeout(8000)  # le vote est compté après ~5 s sur la page
@@ -85,11 +113,15 @@ def cliquer(ctx, page, btn):
 
 def voter(browser, state):
     """Retourne le nombre de boutons trouvés."""
+    global diag_fait
     ctx = browser.new_context(storage_state=state)
     page = ctx.new_page()
     trouves = 0
     try:
         page.goto(URL, wait_until="networkidle")
+        if not diag_fait:
+            diag(page, "debut")
+            diag_fait = True
 
         champ = page.locator("input[type='text']").first
         if champ.count() and champ.is_visible():
@@ -117,6 +149,7 @@ def voter(browser, state):
                 log(f"{nom} : VOTE OK, compte à rebours lancé ({timer})")
             else:
                 log(f"{nom} : VOTE NON PRIS EN COMPTE (pas de compte à rebours)")
+                diag(page, "apres-echec")
     finally:
         ctx.close()
     return trouves
