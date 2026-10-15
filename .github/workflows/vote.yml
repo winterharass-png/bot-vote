@@ -19,5 +19,5 @@ jobs:
       - run: python vote_bot.py
         env:
           LOOP_MINUTES: "340"
-          CHECK_EVERY: "60"
+          CHECK_EVERY: "300"
           SESSION_JSON: ${{ secrets.SESSION_JSON }}
